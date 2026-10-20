@@ -631,6 +631,7 @@ python lora_ft_webui.py   # 然后打开 http://localhost:7860
 | [**ComfyUI-VoxCPMTTS**](https://github.com/1038lab/ComfyUI-VoxCPMTTS) | ComfyUI TTS 扩展 |
 | [**TTS WebUI**](https://github.com/rsxdalv/tts_webui_extension.vox_cpm) | 浏览器端 TTS 扩展 |
 | [**Video Dubbing Translator**](https://github.com/kadirb4rut/video-dubbing-translator) | 本地优先的视频配音：人声分离 → WhisperX ASR → 翻译 → VoxCPM2 声音克隆 → 对口型 |
+| [**Ahenk**](https://github.com/ozguradmin/ahenk-turkish-tts) | VoxCPM2 土耳其语 LoRA（开放权重），支持疑问语调、情感控制和数字/日期规范化，另附可在浏览器中运行的 8.6M 小模型 |
 
 > 完整生态见[文档](https://voxcpm.readthedocs.io/zh-cn/latest/)。社区项目非 OpenBMB 官方维护。做了什么有趣的东西？[提 Issue 或 PR](https://github.com/OpenBMB/VoxCPM/issues) 把它加进来！
 
