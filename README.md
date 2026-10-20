@@ -641,6 +641,7 @@ Full documentation: **[voxcpm.readthedocs.io](https://voxcpm.readthedocs.io/en/l
 | **[ComfyUI-VoxCPMTTS](https://github.com/1038lab/ComfyUI-VoxCPMTTS)**       | ComfyUI TTS extension                                                                            |
 | **[TTS WebUI](https://github.com/rsxdalv/tts_webui_extension.vox_cpm)**     | Browser-based TTS extension                                                                      |
 | **[Video Dubbing Translator](https://github.com/kadirb4rut/video-dubbing-translator)** | Local-first video dubbing: vocal separation → WhisperX ASR → translation → VoxCPM2 voice cloning → lip-sync |
+| **[Ahenk](https://github.com/ozguradmin/ahenk-turkish-tts)** | Turkish LoRA for VoxCPM2 (open weights) with question intonation, emotions and a number/date normaliser, plus an 8.6M student model that runs in the browser |
 
 
 > See the full [Ecosystem](https://voxcpm.readthedocs.io/en/latest/) in the docs. Community projects are not officially maintained by OpenBMB. Built something cool? [Open an issue or PR](https://github.com/OpenBMB/VoxCPM/issues) to add it!
