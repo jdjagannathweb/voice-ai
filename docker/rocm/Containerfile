@@ -1,10 +1,10 @@
 # ─────────────────────────────────────────────────────────────────────
 # VoxCPM WebUI — container image for AMD GPUs (ROCm)
 # ─────────────────────────────────────────────────────────────────────
-# Build context is the project root:
+# Build with docker/rocm/build.sh (-> localhost/voxcpm:rocm), or by hand
+# from the project root:
 #
-#   podman build -f docker/rocm/Containerfile -t voxcpm-rocm .
-#   (docker build works the same way)
+#   podman build -f docker/rocm/Containerfile -t voxcpm:rocm .
 #
 # Run: docker/rocm/run.sh   — details in docker/rocm/README.md
 #

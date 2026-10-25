@@ -6,7 +6,7 @@
 #
 # Everything is configurable through environment variables:
 #
-#   IMAGE          image tag                       (default: voxcpm-rocm)
+#   IMAGE          image                           (default: voxcpm:rocm, see build.sh)
 #   ENGINE         podman | docker                 (default: podman if installed)
 #   PORT           host + container port           (default: 8808)
 #   DATA_ROOT      host dir holding models/ data/ lora/ output/
@@ -22,7 +22,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
-IMAGE="${IMAGE:-voxcpm-rocm}"
+IMAGE="${IMAGE:-voxcpm:rocm}"
 ENGINE="${ENGINE:-$(command -v podman >/dev/null && echo podman || echo docker)}"
 PORT="${PORT:-8808}"
 DATA_ROOT="${DATA_ROOT:-$PROJECT_ROOT}"

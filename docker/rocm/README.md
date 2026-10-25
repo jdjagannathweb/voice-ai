@@ -8,13 +8,14 @@ training UI (`lora_ft_webui.py`) on AMD Radeon GPUs. Tested on an
 |---|---|
 | `Containerfile` | python 3.11-slim + PyTorch 2.9.1 ROCm 6.4 wheels + VoxCPM |
 | `launch.py` | Runs the upstream `app.py` unchanged, with ROCm/multilingual tweaks via env vars |
+| `build.sh` | Builds `localhost/voxcpm:rocm`, optionally tags and pushes to a registry |
 | `run.sh` | `podman run` / `docker run` with GPU passthrough and volume mounts |
 
 ## Quick start
 
 ```bash
 # from the project root
-podman build -f docker/rocm/Containerfile -t voxcpm-rocm .
+docker/rocm/build.sh                        # -> localhost/voxcpm:rocm
 docker/rocm/run.sh                          # WebUI -> http://localhost:8808
 docker/rocm/run.sh python lora_ft_webui.py  # LoRA training UI
 ```
@@ -27,11 +28,26 @@ The first generation downloads `openbmb/VoxCPM2` (~5 GB) to `models/hf`,
 ZipEnhancer (the reference denoiser) to `models/modelscope`, and Whisper on
 first ASR use. All of these persist in the `models/` volume.
 
+## build.sh settings
+
+| Variable | Default | |
+|---|---|---|
+| `IMAGE_NAME`, `TAG` | `voxcpm`, `rocm` | local image is `localhost/IMAGE_NAME:TAG` |
+| `REGISTRY` | — | e.g. `ghcr.io/<user>`: also tags `REGISTRY/IMAGE_NAME:TAG` and `:TAG-<git sha>` |
+| `PUSH` | `0` | `1` pushes both registry tags (log in first: `podman login ghcr.io`) |
+| `SOURCE_URL` | `origin` remote | OCI source label/annotation; GHCR links the package to this repo |
+
+Extra arguments go to `podman build`, e.g. `docker/rocm/build.sh --no-cache`.
+
+```bash
+REGISTRY=ghcr.io/<user> PUSH=1 docker/rocm/build.sh
+```
+
 ## run.sh settings
 
 | Variable | Default | |
 |---|---|---|
-| `IMAGE` | `voxcpm-rocm` | |
+| `IMAGE` | `voxcpm:rocm` | e.g. `ghcr.io/<user>/voxcpm:rocm` to run a pulled image |
 | `ENGINE` | `podman` if installed, else `docker` | |
 | `PORT` | `8808` | host and container port |
 | `DATA_ROOT` | project root | holds `models/ data/ lora/ output/` |
