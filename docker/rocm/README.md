@@ -68,6 +68,7 @@ REGISTRY=ghcr.io/<user> PUSH=1 docker/rocm/build.sh
 | `ASR_LANGUAGE` | auto | force a language, e.g. `id` |
 | `ASR_DEVICE` | same GPU | `cpu` if VRAM is tight |
 | `TEXT_NUMBER_LANG` | off | expand digits to words with `num2words`, e.g. `id`: `2026` → "dua ribu dua puluh enam", `Rp 25.000` → "dua puluh lima ribu rupiah", `09.30` → "sembilan tiga puluh". The built-in text normalizer only handles zh/en |
+| `MIOPEN_FIND_MODE` | `FAST` | Skips MIOpen's per-shape kernel benchmarking. In the default mode every new text length triggers it, so long or varied text runs 4–5× slower |
 
 ## Measured on an RX 6700 XT
 
@@ -78,8 +79,9 @@ REGISTRY=ghcr.io/<user> PUSH=1 docker/rocm/build.sh
 
 A small-batch linear layer runs 5× faster in fp16 than in bf16 on this card
 (51 µs vs 251 µs), and the audio output is equivalent (no NaNs, same RMS).
-The first generation after start-up (and the first at a new length) is 2–3×
-slower while hipBLAS/MIOpen tune kernels.
+The first generation after start-up is 2–3× slower while kernels warm up.
+Without `MIOPEN_FIND_MODE=FAST` (the image default), *every* new text length
+is also slow, because MIOpen benchmarks its convolution kernels per input shape.
 
 ## Tips for non-English / non-Chinese text
 

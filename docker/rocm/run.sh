@@ -16,7 +16,8 @@
 #                  official ROCm list (e.g. RX 6700 XT -> 10.3.0); set to
 #                  override, or to "none" to disable.
 #   Any of VOXCPM_MODEL VOXCPM_DTYPE VOXCPM_OPTIMIZE ASR_BACKEND ASR_MODEL
-#   ASR_LANGUAGE ASR_DEVICE TEXT_NUMBER_LANG HF_TOKEN are passed through.
+#   ASR_LANGUAGE ASR_DEVICE TEXT_NUMBER_LANG HF_TOKEN MIOPEN_FIND_MODE are
+#   passed through.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -71,7 +72,7 @@ fi
 [ -n "${IP:-}" ] && args+=(--ip "$IP")
 
 for v in VOXCPM_MODEL VOXCPM_DTYPE VOXCPM_OPTIMIZE ASR_BACKEND ASR_MODEL \
-         ASR_LANGUAGE ASR_DEVICE TEXT_NUMBER_LANG HF_TOKEN; do
+         ASR_LANGUAGE ASR_DEVICE TEXT_NUMBER_LANG HF_TOKEN MIOPEN_FIND_MODE; do
   [ -n "${!v+x}" ] && args+=(-e "$v=${!v}")
 done
 

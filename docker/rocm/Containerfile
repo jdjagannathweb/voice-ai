@@ -69,8 +69,12 @@ RUN rm -rf /app/build /app/src/*.egg-info \
     && mkdir -p /app/models /app/data /app/lora /app/output \
     && chmod 1777 /app/models /app/data /app/lora /app/output
 
-# ROCm runtime
-ENV PYTORCH_HIP_ALLOC_CONF=expandable_segments:True \
+# ROCm runtime.
+# MIOPEN_FIND_MODE=FAST: the default mode benchmarks conv kernels for every new
+# input shape, i.e. every new text/audio length, which makes TTS on varied text
+# 4-5x slower (measured RTF ~11 vs ~2.3 for long-form chunks on gfx1031).
+ENV MIOPEN_FIND_MODE=FAST \
+    PYTORCH_HIP_ALLOC_CONF=expandable_segments:True \
     MIOPEN_USER_DB_PATH=/app/models/.cache/miopen \
     MIOPEN_CUSTOM_CACHE_DIR=/app/models/.cache/miopen
 
