@@ -9,7 +9,9 @@
 #   IMAGE_NAME     image name                          (default: voxcpm)
 #   TAG            main tag                            (default: rocm)
 #   REGISTRY       e.g. ghcr.io/<user>; tags the image there as well
-#   PUSH           1 = push REGISTRY/IMAGE_NAME:TAG and :TAG-<git sha>
+#   PUSH           1 = push the registry tags
+#   SHA_TAG        1 = also tag/push REGISTRY/IMAGE_NAME:TAG-<git sha> (default: 1)
+#   LOCAL_TAG      0 = with REGISTRY set, skip the localhost/IMAGE_NAME:TAG tag
 #   SOURCE_URL     repo URL stored in the OCI source label/annotation, which
 #                  GHCR uses to link the package to a repository
 #                  (default: the "origin" remote as https://github.com/...)
@@ -26,6 +28,8 @@ IMAGE_NAME="${IMAGE_NAME:-voxcpm}"
 TAG="${TAG:-rocm}"
 REGISTRY="${REGISTRY:-}"
 PUSH="${PUSH:-0}"
+SHA_TAG="${SHA_TAG:-1}"
+LOCAL_TAG="${LOCAL_TAG:-1}"
 
 REV="$(git -C "$PROJECT_ROOT" rev-parse HEAD 2>/dev/null || echo unknown)"
 SHORT="${REV:0:7}"
@@ -55,20 +59,26 @@ for kv in \
   [ "$ENGINE" = podman ] && meta+=(--annotation "$kv")
 done
 
-tags=(-t "$LOCAL_REF")
+remote_tags=()
 if [ -n "$REGISTRY" ]; then
-  tags+=(-t "$REGISTRY/$IMAGE_NAME:$TAG" -t "$REGISTRY/$IMAGE_NAME:$TAG-$SHORT")
+  remote_tags=("$TAG")
+  [ "$SHA_TAG" = 1 ] && remote_tags+=("$TAG-$SHORT")
 fi
+names=()
+[ "$LOCAL_TAG" = 1 ] || [ -z "$REGISTRY" ] && names+=("$LOCAL_REF")
+for t in "${remote_tags[@]}"; do names+=("$REGISTRY/$IMAGE_NAME:$t"); done
+tags=()
+for n in "${names[@]}"; do tags+=(-t "$n"); done
 
-echo "+ building $LOCAL_REF (rev $SHORT, source $SOURCE_URL)" >&2
+echo "+ building ${names[*]} (rev $SHORT, source $SOURCE_URL)" >&2
 "$ENGINE" build -f "$SCRIPT_DIR/Containerfile" "${meta[@]}" "${tags[@]}" "$@" "$PROJECT_ROOT"
 
 if [ "$PUSH" = 1 ]; then
   [ -n "$REGISTRY" ] || { echo "PUSH=1 needs REGISTRY (e.g. ghcr.io/<user>)" >&2; exit 1; }
-  for t in "$TAG" "$TAG-$SHORT"; do
+  for t in "${remote_tags[@]}"; do
     echo "+ pushing $REGISTRY/$IMAGE_NAME:$t" >&2
     "$ENGINE" push "$REGISTRY/$IMAGE_NAME:$t"
   done
 fi
 
-echo "Done: $LOCAL_REF${REGISTRY:+ and $REGISTRY/$IMAGE_NAME:$TAG}" >&2
+echo "Done: ${names[*]}" >&2

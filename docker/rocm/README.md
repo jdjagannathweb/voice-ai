@@ -34,7 +34,9 @@ first ASR use. All of these persist in the `models/` volume.
 |---|---|---|
 | `IMAGE_NAME`, `TAG` | `voxcpm`, `rocm` | local image is `localhost/IMAGE_NAME:TAG` |
 | `REGISTRY` | — | e.g. `ghcr.io/<user>`: also tags `REGISTRY/IMAGE_NAME:TAG` and `:TAG-<git sha>` |
-| `PUSH` | `0` | `1` pushes both registry tags (log in first: `podman login ghcr.io`) |
+| `PUSH` | `0` | `1` pushes the registry tags (log in first: `podman login ghcr.io`) |
+| `SHA_TAG` | `1` | `0` skips the extra `:TAG-<git sha>` tag |
+| `LOCAL_TAG` | `1` | `0` (with `REGISTRY`) keeps only the registry name locally |
 | `SOURCE_URL` | `origin` remote | OCI source label/annotation; GHCR links the package to this repo |
 
 Extra arguments go to `podman build`, e.g. `docker/rocm/build.sh --no-cache`.
