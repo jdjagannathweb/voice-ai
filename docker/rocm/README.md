@@ -69,6 +69,8 @@ REGISTRY=ghcr.io/<user> PUSH=1 docker/rocm/build.sh
 | `ASR_DEVICE` | same GPU | `cpu` if VRAM is tight |
 | `TEXT_NUMBER_LANG` | off | expand digits to words with `num2words`, e.g. `id`: `2026` → "dua ribu dua puluh enam", `Rp 25.000` → "dua puluh lima ribu rupiah", `09.30` → "sembilan tiga puluh". The built-in text normalizer only handles zh/en |
 | `MIOPEN_FIND_MODE` | `FAST` | Skips MIOpen's per-shape kernel benchmarking. In the default mode every new text length triggers it, so long or varied text runs 4–5× slower |
+| `AUTO_SPLIT_WORDS` | `150` | Longer text is split into paragraph/sentence chunks, generated with one seed and a locked voice (chunk 1's first 12 s become the reference), and joined. Long results are also saved to `/app/output/webui_<time>.wav/.mp3`. `0` = off: a single call fails beyond ~1,400 words |
+| `AUTO_SPLIT_PAUSE` | `0.7` | pause between paragraphs, seconds |
 
 ## Measured on an RX 6700 XT
 

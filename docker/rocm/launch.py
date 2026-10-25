@@ -18,6 +18,12 @@ environment variables:
   ASR_MODEL            whisper model id (default openai/whisper-large-v3-turbo)
   ASR_LANGUAGE         force whisper language, e.g. "id"; empty = auto-detect
   ASR_DEVICE           device for ASR (default: same GPU as VoxCPM)
+  AUTO_SPLIT_WORDS     text longer than this (default 150 words) is split into
+                       paragraph/sentence chunks, generated with one seed and
+                       a locked voice, and joined; 0 = off (one generate call,
+                       which fails beyond ~1,400 words). Long results are also
+                       saved to /app/output/webui_<time>.wav/.mp3.
+  AUTO_SPLIT_PAUSE     pause between paragraphs in seconds (default 0.7)
   TEXT_NUMBER_LANG     expand digits to words before synthesis, e.g. "id"
                        ("2026" -> "dua ribu dua puluh enam"); empty = off.
                        Upstream "normalize" only knows zh/en, so leave the
@@ -166,6 +172,148 @@ def _build_generate_kwargs(self, *, final_text, **kwargs):
 
 
 vox.VoxCPMDemo._build_generate_kwargs = _build_generate_kwargs
+
+
+# ── Long text: split, generate chunk by chunk, join ──────────────────
+# One generate() call tops out around 1,400 words (max_len 4096 steps of
+# 0.16 s, 8192-token KV cache), and decoding a long latent in one go needs
+# several GB of extra VRAM. Longer text is split into paragraph/sentence
+# chunks, each generated with the same seed and a locked voice, then joined.
+_SENT_END = re.compile(r"(?<=[.!?…])[\"')\]]*\s+")
+
+
+def _split_long(text: str, max_words: int) -> list:
+    if len(text.split()) <= max_words:
+        return [text]
+    out, cur = [], []
+    for s in (x for x in _SENT_END.split(text) if x.strip()):
+        words = s.split()
+        sub = [s]
+        if len(words) > max_words:
+            sub = re.split(r"(?<=[,;:])\s+", s)
+            if any(len(x.split()) > max_words for x in sub):
+                sub = [" ".join(words[i : i + max_words]) for i in range(0, len(words), max_words)]
+        for x in sub:
+            if cur and len(" ".join(cur + [x]).split()) > max_words:
+                out.append(" ".join(cur))
+                cur = []
+            cur.append(x)
+    if cur:
+        out.append(" ".join(cur))
+    return out
+
+
+def split_text(raw: str, max_words: int) -> list:
+    """[(chunk_text, ends_paragraph)] — paragraphs are blank-line separated."""
+    paras = [re.sub(r"\s+", " ", p).strip() for p in re.split(r"\n\s*\n", raw)]
+    chunks, buf = [], ""
+    for p in (p for p in paras if p):
+        if len(p.split()) > max_words:
+            if buf:
+                chunks.append((buf, True))
+                buf = ""
+            parts = _split_long(p, max_words)
+            chunks += [(x, i == len(parts) - 1) for i, x in enumerate(parts)]
+        elif buf and len((buf + " " + p).split()) > max_words:
+            chunks.append((buf, True))
+            buf = p
+        else:
+            buf = f"{buf} {p}".strip()
+    if buf:
+        chunks.append((buf, True))
+    return chunks
+
+
+_orig_generate_tts = vox.VoxCPMDemo.generate_tts_audio
+
+
+def _generate_tts_audio(
+    self,
+    text_input,
+    control_instruction="",
+    reference_wav_path_input=None,
+    prompt_text="",
+    cfg_value_input=2.0,
+    do_normalize=True,
+    denoise=True,
+    inference_timesteps=10,
+    seed=None,
+):
+    import random
+    import tempfile
+    import time
+
+    import numpy as np
+    import soundfile as sf
+    import torch
+
+    max_words = int(os.environ.get("AUTO_SPLIT_WORDS", "150") or 0)
+    chunks = split_text(text_input or "", max_words) if max_words > 0 else []
+    if len(chunks) <= 1:
+        return _orig_generate_tts(
+            self, text_input, control_instruction, reference_wav_path_input, prompt_text,
+            cfg_value_input, do_normalize, denoise, inference_timesteps, seed,
+        )
+
+    seed = seed if seed is not None else random.randint(0, 2**32 - 1)
+    words = sum(len(c.split()) for c, _ in chunks)
+    logger.info(f"[long text] {words} words -> {len(chunks)} chunks, seed {seed}")
+    ref, user_ref = reference_wav_path_input, bool(reference_wav_path_input)
+    pieces, sr, t0 = [], None, time.time()
+    tmpdir = tempfile.mkdtemp(prefix="voxcpm_long_")
+    for i, (chunk, para_end) in enumerate(chunks, 1):
+        t = time.time()
+        sr, wav, _ = _orig_generate_tts(
+            self,
+            chunk,
+            control_instruction,
+            ref,
+            prompt_text if user_ref else "",
+            cfg_value_input,
+            do_normalize,
+            denoise and user_ref,  # only the user's recording needs denoising
+            inference_timesteps,
+            seed,
+        )
+        wav = np.asarray(wav, dtype=np.float32)
+        pieces.append(wav)
+        if i < len(chunks):
+            pause = float(os.environ.get("AUTO_SPLIT_PAUSE", "0.7")) if para_end else 0.25
+            pieces.append(np.zeros(int(sr * pause), dtype=np.float32))
+        if ref is None:
+            # lock the voice: the first 12 s of chunk 1 become the reference
+            ref = os.path.join(tmpdir, "voice_ref.wav")
+            sf.write(ref, wav[: int(sr * 12)], sr)
+        torch.cuda.empty_cache()
+        done = time.time() - t0
+        logger.info(
+            f"[long text] chunk {i}/{len(chunks)}: {len(wav) / sr:.1f} s audio in {time.time() - t:.0f} s,"
+            f" about {done / i * (len(chunks) - i) / 60:.0f} min left"
+        )
+
+    audio = np.concatenate(pieces)
+    peak = float(np.abs(audio).max())
+    if peak > 0.99:
+        audio *= 0.99 / peak
+    # Long renders also land in /app/output, so a closed browser tab doesn't lose hours of work.
+    outdir = os.environ.get("AUTO_SPLIT_OUTDIR", "/app/output")
+    if os.path.isdir(outdir) and os.access(outdir, os.W_OK):
+        base = os.path.join(outdir, time.strftime("webui_%Y%m%d_%H%M%S"))
+        sf.write(base + ".wav", audio, sr)
+        try:
+            import subprocess
+
+            subprocess.run(
+                ["ffmpeg", "-y", "-loglevel", "error", "-i", base + ".wav", "-codec:a", "libmp3lame", "-q:a", "2", base + ".mp3"],
+                check=True,
+            )
+        except Exception as e:
+            logger.warning(f"mp3 encode failed: {e}")
+        logger.info(f"[long text] saved {base}.wav / .mp3 ({len(audio) / sr / 60:.1f} min)")
+    return sr, audio, seed
+
+
+vox.VoxCPMDemo.generate_tts_audio = _generate_tts_audio
 
 
 def check_gpu_kernels():
