@@ -26,6 +26,9 @@ environment variables:
   AUTO_SPLIT_PAUSE     pause between paragraphs in seconds (default 0.7)
   DIT_STEPS            starting value of the "LocDiT flow-matching steps"
                        slider (default 10; fewer = faster, rougher audio)
+  VOICES_DIR           voice presets folder (default /app/data/voices): each
+                       audio file is a preset in the WebUI dropdown, with an
+                       optional <name>.txt transcript for Ultimate Cloning
   TEXT_NUMBER_LANG     expand digits to words before synthesis, e.g. "id"
                        ("2026" -> "dua ribu dua puluh enam"); empty = off.
                        Upstream "normalize" only knows zh/en, so leave the
@@ -398,6 +401,142 @@ def _create_demo_interface(demo):
 
 
 vox.create_demo_interface = _create_demo_interface
+
+
+# ── Voice presets ────────────────────────────────────────────────────
+# Audio files in VOICES_DIR (default /app/data/voices) show up in a "Voice
+# preset" dropdown above the reference audio. Picking one fills the reference
+# audio, turns on Ultimate Cloning and fills the transcript from <name>.txt.
+# Without a .txt, Whisper transcribes it once and the result is saved there
+# (editable). Presets are matched by file content, so Gradio's copy of the
+# file still gets the stored transcript instead of a fresh Whisper run.
+VOICES_DIR = os.environ.get("VOICES_DIR", "/app/data/voices")
+_AUDIO_EXT = (".wav", ".mp3", ".flac", ".ogg", ".m4a", ".opus")
+_NO_PRESET = "—"
+
+
+def _voice_presets() -> dict:
+    """{name: audio_path} for every audio file in VOICES_DIR."""
+    if not os.path.isdir(VOICES_DIR):
+        return {}
+    return {
+        os.path.splitext(f)[0]: os.path.join(VOICES_DIR, f)
+        for f in sorted(os.listdir(VOICES_DIR))
+        if f.lower().endswith(_AUDIO_EXT) and not f.startswith(".")
+    }
+
+
+def _file_sha1(path: str) -> str:
+    import hashlib
+
+    h = hashlib.sha1()
+    with open(path, "rb") as f:
+        for block in iter(lambda: f.read(1 << 20), b""):
+            h.update(block)
+    return h.hexdigest()
+
+
+def _preset_for_audio(path: str):
+    """Preset audio path whose content equals `path`, else None."""
+    if not path or not os.path.isfile(path):
+        return None
+    size, digest = os.path.getsize(path), None
+    for preset in _voice_presets().values():
+        if os.path.getsize(preset) == size:
+            digest = digest or _file_sha1(path)
+            if _file_sha1(preset) == digest:
+                return preset
+    return None
+
+
+_asr_without_presets = vox.VoxCPMDemo.prompt_wav_recognition
+
+
+def _prompt_wav_recognition_presets(self, prompt_wav):
+    preset = _preset_for_audio(prompt_wav)
+    if preset is None:
+        return _asr_without_presets(self, prompt_wav)
+    txt = os.path.splitext(preset)[0] + ".txt"
+    if os.path.isfile(txt):
+        return open(txt, encoding="utf-8").read().strip()
+    text = _asr_without_presets(self, preset)
+    try:
+        with open(txt, "w", encoding="utf-8") as f:
+            f.write(text + "\n")
+        logger.info(f"[voice preset] saved transcript {txt}")
+    except OSError as e:
+        logger.warning(f"[voice preset] could not save {txt}: {e}")
+    return text
+
+
+vox.VoxCPMDemo.prompt_wav_recognition = _prompt_wav_recognition_presets
+
+_create_ui_without_presets = vox.create_demo_interface
+
+
+def _create_demo_interface_presets(demo):
+    gr = vox.gr
+    real_audio, found = gr.Audio, {}
+
+    def audio(*args, **kwargs):
+        # the reference input is the only Audio with upload + microphone sources
+        if kwargs.get("sources") == ["upload", "microphone"] and "preset" not in found:
+            found["preset"] = gr.Dropdown(
+                choices=[_NO_PRESET] + list(_voice_presets()),
+                value=_NO_PRESET,
+                label="Voice preset",
+                info=f"Audio files in {VOICES_DIR} (refresh the page after adding one)",
+            )
+            found["ref"] = real_audio(*args, **kwargs)
+            return found["ref"]
+        return real_audio(*args, **kwargs)
+
+    gr.Audio = audio
+    try:
+        interface = _create_ui_without_presets(demo)
+    finally:
+        gr.Audio = real_audio
+    if "preset" not in found:
+        logger.warning("[voice preset] reference audio component not found; presets disabled")
+        return interface
+
+    # find the Ultimate Cloning checkbox and transcript box by their place in
+    # the layout: they are the two components right after the reference audio
+    blocks = list(interface.blocks.values())
+    i = blocks.index(found["ref"])
+    use_prompt, prompt_box = blocks[i + 1], blocks[i + 2]
+
+    def pick(name):
+        path = _voice_presets().get(name)
+        if not path:
+            return None, False, ""
+        return path, True, demo.prompt_wav_recognition(path)
+
+    with interface:
+        found["preset"].change(
+            fn=pick,
+            inputs=[found["preset"]],
+            outputs=[found["ref"], use_prompt, prompt_box],
+        )
+        interface.load(
+            fn=lambda: gr.update(choices=[_NO_PRESET] + list(_voice_presets())),
+            outputs=[found["preset"]],
+        )
+    return interface
+
+
+vox.create_demo_interface = _create_demo_interface_presets
+
+# Gradio only serves files from allowed paths; presets live in VOICES_DIR.
+_real_launch = vox.gr.Blocks.launch
+
+
+def _launch(self, *args, **kwargs):
+    kwargs["allowed_paths"] = list(kwargs.get("allowed_paths") or []) + [VOICES_DIR]
+    return _real_launch(self, *args, **kwargs)
+
+
+vox.gr.Blocks.launch = _launch
 
 
 def check_gpu_kernels():
