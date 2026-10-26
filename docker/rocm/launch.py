@@ -121,8 +121,24 @@ def _prompt_wav_recognition(self, prompt_wav):
     lang = os.environ.get("ASR_LANGUAGE", "").strip()
     if lang:
         gen_kwargs["language"] = lang
-    out = _get_whisper(self)(prompt_wav, chunk_length_s=30, generate_kwargs=gen_kwargs)
+    try:
+        out = _get_whisper(self)(prompt_wav, chunk_length_s=30, generate_kwargs=gen_kwargs)
+    finally:
+        # Whisper is needed for a few seconds per reference; keeping it on the
+        # GPU costs ~1.5 GB that long renders need (reloading takes a few s).
+        if self.asr_device.startswith("cuda"):
+            _free_gpu_model(self, "_whisper")
     return out["text"].strip()
+
+
+def _free_gpu_model(obj, attr):
+    import gc
+
+    import torch
+
+    setattr(obj, attr, None)
+    gc.collect()
+    torch.cuda.empty_cache()
 
 
 vox.VoxCPMDemo.prompt_wav_recognition = _prompt_wav_recognition
@@ -249,13 +265,22 @@ def _generate_tts_audio(
     import soundfile as sf
     import torch
 
+    import gc
+
     max_words = int(os.environ.get("AUTO_SPLIT_WORDS", "150") or 0)
     chunks = split_text(text_input or "", max_words) if max_words > 0 else []
     if len(chunks) <= 1:
-        return _orig_generate_tts(
-            self, text_input, control_instruction, reference_wav_path_input, prompt_text,
-            cfg_value_input, do_normalize, denoise, inference_timesteps, seed,
-        )
+        try:
+            return _orig_generate_tts(
+                self, text_input, control_instruction, reference_wav_path_input, prompt_text,
+                cfg_value_input, do_normalize, denoise, inference_timesteps, seed,
+            )
+        except torch.OutOfMemoryError:
+            # fall through to the chunked path, which retries in smaller parts
+            gc.collect()
+            torch.cuda.empty_cache()
+            logger.warning("[long text] out of GPU memory in one call, retrying in smaller parts")
+            chunks = [(re.sub(r"\s+", " ", text_input).strip(), True)]
 
     seed = seed if seed is not None else random.randint(0, 2**32 - 1)
     words = sum(len(c.split()) for c, _ in chunks)
@@ -263,21 +288,49 @@ def _generate_tts_audio(
     ref, user_ref = reference_wav_path_input, bool(reference_wav_path_input)
     pieces, sr, t0 = [], None, time.time()
     tmpdir = tempfile.mkdtemp(prefix="voxcpm_long_")
+
+    def gen_piece(text, ref_wav, depth=0):
+        """Generate one chunk; on GPU OOM free memory and retry it as halves."""
+        oom = None
+        try:
+            sr_, wav_, _ = _orig_generate_tts(
+                self,
+                text,
+                control_instruction,
+                ref_wav,
+                prompt_text if user_ref else "",
+                cfg_value_input,
+                do_normalize,
+                denoise and user_ref,  # only the user's recording needs denoising
+                inference_timesteps,
+                seed,
+            )
+            return sr_, np.asarray(wav_, dtype=np.float32)
+        except torch.OutOfMemoryError as e:
+            oom = str(e).split(".")[0]
+        # Retry outside the except block: the live traceback would otherwise
+        # keep the failed attempt's tensors allocated during the retry.
+        gc.collect()
+        torch.cuda.empty_cache()
+        n = len(text.split())
+        if n < 8 or depth >= 4:
+            raise torch.OutOfMemoryError(f"{oom} (even after splitting down to {n} words)")
+        parts = _split_long(text, (n + 1) // 2)
+        if len(parts) < 2:
+            w = text.split()
+            parts = [" ".join(w[: n // 2]), " ".join(w[n // 2 :])]
+        logger.warning(f"[long text] out of GPU memory on {n} words, retrying as {len(parts)} smaller parts")
+        out, sr_ = [], None
+        for j, part in enumerate(parts):
+            sr_, w = gen_piece(part, ref_wav, depth + 1)
+            out.append(w)
+            if j < len(parts) - 1:
+                out.append(np.zeros(int(sr_ * 0.25), dtype=np.float32))
+        return sr_, np.concatenate(out)
+
     for i, (chunk, para_end) in enumerate(chunks, 1):
         t = time.time()
-        sr, wav, _ = _orig_generate_tts(
-            self,
-            chunk,
-            control_instruction,
-            ref,
-            prompt_text if user_ref else "",
-            cfg_value_input,
-            do_normalize,
-            denoise and user_ref,  # only the user's recording needs denoising
-            inference_timesteps,
-            seed,
-        )
-        wav = np.asarray(wav, dtype=np.float32)
+        sr, wav = gen_piece(chunk, ref)
         pieces.append(wav)
         if i < len(chunks):
             pause = float(os.environ.get("AUTO_SPLIT_PAUSE", "0.7")) if para_end else 0.25
