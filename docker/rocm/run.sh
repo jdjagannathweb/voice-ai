@@ -17,7 +17,7 @@
 #                  override, or to "none" to disable.
 #   Any of VOXCPM_MODEL VOXCPM_DTYPE VOXCPM_OPTIMIZE ASR_BACKEND ASR_MODEL
 #   ASR_LANGUAGE ASR_DEVICE TEXT_NUMBER_LANG HF_TOKEN MIOPEN_FIND_MODE
-#   AUTO_SPLIT_WORDS AUTO_SPLIT_PAUSE are passed through.
+#   AUTO_SPLIT_WORDS AUTO_SPLIT_PAUSE DIT_STEPS are passed through.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -73,7 +73,7 @@ fi
 
 for v in VOXCPM_MODEL VOXCPM_DTYPE VOXCPM_OPTIMIZE ASR_BACKEND ASR_MODEL \
          ASR_LANGUAGE ASR_DEVICE TEXT_NUMBER_LANG HF_TOKEN MIOPEN_FIND_MODE \
-         AUTO_SPLIT_WORDS AUTO_SPLIT_PAUSE; do
+         AUTO_SPLIT_WORDS AUTO_SPLIT_PAUSE DIT_STEPS; do
   [ -n "${!v+x}" ] && args+=(-e "$v=${!v}")
 done
 

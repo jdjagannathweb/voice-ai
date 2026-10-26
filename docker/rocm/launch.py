@@ -24,6 +24,8 @@ environment variables:
                        which fails beyond ~1,400 words). Long results are also
                        saved to /app/output/webui_<time>.wav/.mp3.
   AUTO_SPLIT_PAUSE     pause between paragraphs in seconds (default 0.7)
+  DIT_STEPS            starting value of the "LocDiT flow-matching steps"
+                       slider (default 10; fewer = faster, rougher audio)
   TEXT_NUMBER_LANG     expand digits to words before synthesis, e.g. "id"
                        ("2026" -> "dua ribu dua puluh enam"); empty = off.
                        Upstream "normalize" only knows zh/en, so leave the
@@ -314,6 +316,35 @@ def _generate_tts_audio(
 
 
 vox.VoxCPMDemo.generate_tts_audio = _generate_tts_audio
+
+
+# ── Default for the "LocDiT flow-matching steps" slider ──────────────
+# app.py hard-codes value=10. DIT_STEPS changes only the slider's starting
+# value; users can still move it per request.
+_orig_create_ui = vox.create_demo_interface
+
+
+def _create_demo_interface(demo):
+    steps = os.environ.get("DIT_STEPS", "").strip()
+    if not steps:
+        return _orig_create_ui(demo)
+    steps = max(1, min(50, int(steps)))
+    real_slider = vox.gr.Slider
+
+    def slider(*args, **kwargs):
+        # the DiT slider is the only one with range 1-50 and default 10
+        if kwargs.get("minimum") == 1 and kwargs.get("maximum") == 50 and kwargs.get("value") == 10:
+            kwargs["value"] = steps
+        return real_slider(*args, **kwargs)
+
+    vox.gr.Slider = slider
+    try:
+        return _orig_create_ui(demo)
+    finally:
+        vox.gr.Slider = real_slider
+
+
+vox.create_demo_interface = _create_demo_interface
 
 
 def check_gpu_kernels():
